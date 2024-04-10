@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader,Dataset,random_split
 from torchvision.models import resnet18, ResNet18_Weights
 import numpy as np
 
@@ -10,7 +9,38 @@ from PIL import Image
 from scipy.spatial.transform import Rotation as R
 import json
 
-def get_data(Ndata=None):
+class RegressionModel(nn.Module):
+    def __init__(self):
+        super(RegressionModel, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(1000, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 7)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+class Image2PoseData(Dataset):
+    """
+    Pytorch Dataset class for the experience data.
+    """
+    def __init__(self,X:np.ndarray,Y:np.ndarray):
+        self.X = X.astype(np.float32)
+        self.Y = Y.astype(np.float32)
+
+    def __len__(self):
+        return self.Y.shape[1]
+
+    def __getitem__(self,idx):
+        x = self.X[:,idx]
+        y = self.Y[:,idx]
+        
+        return x,y
+    
+def get_data(ratio:float,Ndata:int=None):
     # Paths
     images_dir = 'data/images'
     transforms_file = 'data/transforms.json'
@@ -18,9 +48,6 @@ def get_data(Ndata=None):
     # Load frames
     with open(transforms_file, 'r') as json_file:
         frames = json.load(json_file)["frames"]
-
-    if Ndata is not None:
-        frames = frames[:Ndata]
 
     # Step 1: Initialize model with the best available weights
     weights = ResNet18_Weights.DEFAULT
@@ -30,8 +57,13 @@ def get_data(Ndata=None):
     # Step 2: Initialize the inference transforms
     preprocess = weights.transforms()
 
-    # Gather Image Data
+    # Some useful variables
+    if Ndata is not None:
+        frames = frames[:Ndata]
+
     Nimg = len(frames)
+    Ntn = int(ratio*Nimg)
+    Ntt = Nimg - Ntn
 
     # Gather Training Data
     Xdata = np.zeros((1000,Nimg))
@@ -56,67 +88,54 @@ def get_data(Ndata=None):
         Xdata[:,idx] = prediction
         Ydata[:,idx] = pose
     
-    return Xdata,Ydata
+    dset = Image2PoseData(Xdata,Ydata)
+    tn_dset, tt_dset = random_split(dset,[Ntn,Ntt])
 
-class Image2PoseData(Dataset):
-    """
-    Pytorch Dataset class for the experience data.
-    """
-    def __init__(self,X:np.ndarray,Y:np.ndarray):
-        self.X = X.astype(np.float32)
-        self.Y = Y.astype(np.float32)
+    tn_lder = DataLoader(tn_dset, batch_size=64, shuffle=True, drop_last = False)
+    tt_lder = DataLoader(tt_dset, batch_size=64, shuffle=True, drop_last = False)
 
-    def __len__(self):
-        return self.Y.shape[1]
+    return tn_lder, tt_lder
 
-    def __getitem__(self,idx):
-        x = self.X[:,idx]
-        y = self.Y[:,idx]
-        
-        return x,y
-
-def generate_dataloader(X,Y):
-
-    # Get the total number of columns
-    dset = Image2PoseData(X,Y)
-    dgen = DataLoader(dset, batch_size=64, shuffle=True, drop_last = False)
-
-    return dgen
-
-def train_regression_model(model, criterion, optimizer, train_loader, num_epochs=10):
+def train_model(model, criterion, optimizer, train_loader, num_epochs=10):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.train()
 
     for epoch in range(num_epochs):
         losses = []
-        for batch_num, input_data in enumerate(train_loader):
+        for inputs, targets in train_loader:
             optimizer.zero_grad()
-            x, y = input_data
-            x = x.to(device).float()
-            y = y.to(device)
+            inputs = inputs.to(device).float()
+            targets = targets.to(device)
 
-            output = model(x)
-            loss = criterion(output, y)
+            output = model(inputs)
+            loss = criterion(output, targets)
             loss.backward()
             losses.append(loss.item())
 
             optimizer.step()
 
-        print('Epoch %d | Loss %6.2f' % (epoch, sum(losses)/len(losses)))
+        if epoch % 50 == 0:
+            print('Epoch %d | Loss %6.2f' % (epoch, sum(losses)/len(losses)))
 
     torch.save(model.state_dict(), 'img2pose.pth')
 
-# Define your neural network
-class RegressionModel(nn.Module):
-    def __init__(self):
-        super(RegressionModel, self).__init__()
-        self.model = nn.Sequential(
-            nn.Linear(1000, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, 7)
-        )
+def test_model(model, criterion, test_loader):
+    model.eval()  # Set the model to evaluation mode
+    total_loss = 0.0
+    total_samples = 0
 
-    def forward(self, x):
-        return self.model(x)
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            # Forward pass
+            outputs = model(inputs)
+
+            # Calculate the loss
+            loss = criterion(outputs, targets)
+            
+            # Update total loss and total samples
+            total_loss += loss.item() * inputs.size(0)
+            total_samples += inputs.size(0)
+
+    # Calculate average loss
+    average_loss = total_loss / total_samples
+    print(f'Test Loss: {average_loss:.4f}')
