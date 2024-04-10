@@ -4,6 +4,4 @@ conda activate i2p-env
 
 conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 
-conda install anaconda::ipykernel
-
-conda install scipy
+conda install ipykernel scipy matplotlib
