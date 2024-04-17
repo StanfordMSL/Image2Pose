@@ -1,3 +1,12 @@
+import torch.optim as optim
+from torch.utils.data import DataLoader,Dataset,random_split
+from torchvision.models import resnet18, ResNet18_Weights
+import numpy as np
+
+from PIL import Image
+from scipy.spatial.transform import Rotation as R
+import json
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader,Dataset,random_split
@@ -8,8 +17,7 @@ from PIL import Image
 from scipy.spatial.transform import Rotation as R
 import json
 
-
-class BasicData(Dataset):
+class VectorData(Dataset):
     """
     Pytorch Dataset class for the experience data.
     """
@@ -25,7 +33,7 @@ class BasicData(Dataset):
         y = self.Y[:,idx]
         
         return x,y
-    
+
 def get_data(ratio:float,Ndata:int=None):
     # Paths
     images_dir = 'data/images'
@@ -40,7 +48,7 @@ def get_data(ratio:float,Ndata:int=None):
     model = resnet18(weights=weights)
     model.eval()
 
-    model.fc = torch.nn.Linear(512,256)
+    model.fc = torch.nn.Linear(512,253)
 
     # Step 2: Initialize the inference transforms
     preprocess = weights.transforms()
@@ -73,10 +81,12 @@ def get_data(ratio:float,Ndata:int=None):
 
         pose = np.hstack((timg,qimg))
 
-        Xdata[:,idx] = prediction
+        vgrav = transform[:3,:3]@np.array([0.0,0.0,1.0])
+
+        Xdata[:,idx] = np.hstack((prediction,vgrav))
         Ydata[:,idx] = pose
     
-    dset = BasicData(Xdata,Ydata)
+    dset = VectorData(Xdata,Ydata)
     tn_dset, tt_dset = random_split(dset,[Ntn,Ntt])
 
     tn_lder = DataLoader(tn_dset, batch_size=64, shuffle=True, drop_last = False)
