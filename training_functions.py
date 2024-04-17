@@ -32,7 +32,8 @@ def train_model(model, criterion, optimizer, train_loader, model_name, num_epoch
         if epoch % 50 == 0:
             print("Epoch: {:3d} | Loss: {:4.2f}".format(epoch, sum(losses)/len(losses)))
 
-    torch.save(model.state_dict(), model_name+'.pth')
+    print("Epoch: {:3d} | Loss: {:4.2f}".format(epoch, sum(losses)/len(losses)))
+    torch.save(model.state_dict(), 'models/'+model_name+'.pth')
 
 def test_model(model, criterion, test_loader):
     model.eval()  # Set the model to evaluation mode
