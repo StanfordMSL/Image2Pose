@@ -1,115 +1,56 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import resnet18, resnet34, ResNet18_Weights, ResNet34_Weights
+from torchvision.models import resnet18, ResNet18_Weights
 
-class BasicMLP(nn.Module):
-    def __init__(self,layer_sizes:list[int]):
-        super(BasicMLP, self).__init__()
-
-        layers = []
-        for i in range(len(layer_sizes)-1):
-            layers.append(nn.Linear(layer_sizes[i],layer_sizes[i+1]))
-            layers.append(nn.ReLU())
-        
-        self.model = nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = self.model(x)
-
-        x_norm = x.clone()
-        x_norm[:,-4:] = F.normalize(x[:,-4:],p=2,dim=1)
-
-        return x_norm
-
-class SimpleMLP(nn.Module):
-    def __init__(self,layer_sizes:list[int]):
-        super(SimpleMLP, self).__init__()
-
-        layers = []
-        for i in range(len(layer_sizes)-1):
-            layers.append(nn.Linear(layer_sizes[i],layer_sizes[i+1]))
-            layers.append(nn.ReLU())
-        
-        self.model = nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = self.model(x)
-        return x
-    
-class StaggeredMLP(nn.Module):
-    def __init__(self,pos_layer_sizes:list[int],att_layer_sizes:list[int]):
-        super(StaggeredMLP, self).__init__()
+class VisionPoseMLP(nn.Module):
+    def __init__(self,layer_sizes:list[int],lock_resnet:bool=True):
+        super(VisionPoseMLP, self).__init__()
 
         self.networks = nn.ModuleList(
-            [SimpleMLP(pos_layer_sizes)] +
-            [SimpleMLP(att_layer_sizes)])
+            [ResNetReg(layer_sizes[0]-3,lock_resnet)] +
+            [BasicMLP(layer_sizes)])
         
+    def forward(self,x,v):
+        y_img = self.networks[0](x)
+        y_out = self.networks[1](torch.cat((y_img,v),-1))
 
-    def forward(self, x):
-        pos = self.networks[0](x)
-        att = self.networks[1](torch.cat((x,pos),dim=1))
+        y_norm = y_out.clone()
+        y_norm[:,-4:] = F.normalize(y_out[:,-4:],p=2,dim=1)
 
-        att_norm = att.clone()
-        att_norm = F.normalize(att,p=2,dim=1)
+        return y_norm
 
-        x_norm = torch.cat((pos,att_norm),dim=1)
+class ResNetReg(nn.Module):
+    def __init__(self, output_size,lock_resnet:bool=True):
+        super(ResNetReg, self).__init__()
 
-        return x_norm
-    
-class ExtendedMLP_v1(nn.Module):
-    def __init__(self,layer_sizes:list[int]):
-        super(ExtendedMLP_v1, self).__init__()
-
-        layers = [resnet18(weights=ResNet18_Weights.DEFAULT)]
-        for i in range(len(layer_sizes)-1):
-            layers.append(nn.Linear(layer_sizes[i],layer_sizes[i+1]))
-            layers.append(nn.ReLU())
-
-        self.model = nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = self.model(x)
-
-        x_norm = x.clone()
-        x_norm[:,-4:] = F.normalize(x[:,-4:],p=2,dim=1)
-
-        return x_norm
-
-class ExtendedMLP_v2(nn.Module):
-    def __init__(self,layer_sizes:list[int]):
-        super(ExtendedMLP_v2, self).__init__()
-
+        # Instantiate the ResNet18 base
         layers = [resnet18(weights=ResNet18_Weights.DEFAULT),nn.ReLU()]
-        for i in range(len(layer_sizes)-1):
-            layers.append(nn.Linear(layer_sizes[i],layer_sizes[i+1]))
-            layers.append(nn.ReLU())
+
+        # Lock the ResNet18 layers if need be (except for last)
+        if lock_resnet:
+            for param in layers[0].parameters():
+                param.requires_grad = False
+
+        # Modify the last layer to output the correct number of features
+        layers[0].fc = nn.Linear(512,output_size)
 
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.model(x)
-
-        x_norm = x.clone()
-        x_norm[:,-4:] = F.normalize(x[:,-4:],p=2,dim=1)
-
-        return x_norm
+        return self.model(x)
+       
+class BasicMLP(nn.Module):
+    def __init__(self, hidden_layers):
+        super(BasicMLP, self).__init__()
+        layers = []
+        prev_size = hidden_layers[0]
+        for size in hidden_layers[1:-1]:
+            layers.append(nn.Linear(prev_size, size))
+            layers.append(nn.ReLU())
+            prev_size = size
+        layers.append(nn.Linear(prev_size, hidden_layers[-1]))
+        self.model = nn.Sequential(*layers)
     
-class SuperExtendedMLP(nn.Module):
-    def __init__(self,layer_sizes:list[int]):
-        super(SuperExtendedMLP, self).__init__()
-
-        layers = [resnet34(weights=ResNet34_Weights.DEFAULT)]
-        for i in range(len(layer_sizes)-1):
-            layers.append(nn.Linear(layer_sizes[i],layer_sizes[i+1]))
-            layers.append(nn.ReLU())
-
-        self.model = nn.Sequential(*layers)
-
     def forward(self, x):
-        x = self.model(x)
-
-        x_norm = x.clone()
-        x_norm[:,-4:] = F.normalize(x[:,-4:],p=2,dim=1)
-
-        return x_norm
+        return self.model(x)

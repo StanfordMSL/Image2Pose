@@ -13,3 +13,14 @@ conda install pytorch torchvision torchaudio cpuonly -c pytorch
 ===
 
 conda install ipykernel scipy matplotlib
+
+
+Then download the data into the data folder:
+- data
+   - depths
+   - images
+   - mocap
+   - points_colors.ply
+   - points.ply
+   - rotate_poses.py
+   - transforms.json

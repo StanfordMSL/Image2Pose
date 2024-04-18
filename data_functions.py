@@ -8,12 +8,13 @@ from scipy.spatial.transform import Rotation as R
 import json
 
 
-class ExtendedData(Dataset):
+class VisionPoseData(Dataset):
     """
     Pytorch Dataset class for the experience data.
     """
-    def __init__(self,X:np.ndarray,Y:np.ndarray):
+    def __init__(self,X:np.ndarray,V:np.ndarray,Y:np.ndarray):
         self.X = X.astype(np.float32)
+        self.V = V.astype(np.float32)
         self.Y = Y.astype(np.float32)
 
     def __len__(self):
@@ -21,9 +22,10 @@ class ExtendedData(Dataset):
 
     def __getitem__(self,idx):
         x = self.X[idx,:,:,:]
+        v = self.V[:,idx]
         y = self.Y[:,idx]
         
-        return x,y
+        return x,v,y
     
 def get_data(ratio:float,Ndata:int=None):
     # Paths
@@ -34,11 +36,8 @@ def get_data(ratio:float,Ndata:int=None):
     with open(transforms_file, 'r') as json_file:
         frames = json.load(json_file)["frames"]
 
-    # Step 1: Initialize model with the best available weights
-    weights = ResNet18_Weights.DEFAULT
-
-    # Step 2: Initialize the inference transforms
-    preprocess = weights.transforms()
+    # Initialize the inference transforms
+    preprocess = ResNet18_Weights.DEFAULT.transforms()
 
     # Some useful variables
     if Ndata is not None:
@@ -50,30 +49,34 @@ def get_data(ratio:float,Ndata:int=None):
 
     # Gather Training Data
     XXdata = []
+    VVdata = []
     YYdata = []
-    for idx,frame in enumerate(frames):
-        file_path = frame["file_path"]
+    for frame in frames:
+        # Get the raw image and transform
+        file_name = frame["file_path"].split('/')[-1]
+        img_raw = Image.open(f'{images_dir}/{file_name}')
+
         transform = np.array(frame["transform_matrix"])
 
-        file_name = file_path.split('/')[-1]
+        # Process into ResNet amenable image, gravity vector and pose vector
+        img_rnet = preprocess(img_raw).unsqueeze(0).numpy()
 
-        img = Image.open(f'{images_dir}/{file_name}')
-        batch = preprocess(img).unsqueeze(0).numpy()
+        v_grav = transform[:3,:3] @ np.array([0,0,-1])
 
-        Rimg = R.from_matrix(transform[:3,:3])
-        timg = transform[:3,3]
+        q_img = R.from_matrix(transform[:3,:3]).as_quat()
+        t_img = transform[:3,3]
+        pose = np.hstack((t_img,q_img))
 
-        qimg = Rimg.as_quat()
-
-        pose = np.hstack((timg,qimg))
-
-        XXdata.append(batch)
+        # Append to the data
+        XXdata.append(img_rnet)
+        VVdata.append(v_grav)
         YYdata.append(pose)
     
     Xdata = np.concatenate(XXdata,axis=0)
+    Vdata = np.stack(VVdata,axis=1)
     Ydata = np.stack(YYdata,axis=1)
 
-    dset = ExtendedData(Xdata,Ydata)
+    dset = VisionPoseData(Xdata,Vdata,Ydata)
     tn_dset, tt_dset = random_split(dset,[Ntn,Ntt])
 
     tn_lder = DataLoader(tn_dset, batch_size=64, shuffle=True, drop_last = False)
