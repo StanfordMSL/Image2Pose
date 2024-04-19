@@ -1,6 +1,5 @@
-import torch.optim as optim
 from torch.utils.data import DataLoader,Dataset,random_split
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet18_Weights
 import numpy as np
 
 from PIL import Image
@@ -12,8 +11,9 @@ class VisionPoseData(Dataset):
     """
     Pytorch Dataset class for the experience data.
     """
-    def __init__(self,X:np.ndarray,V:np.ndarray,Y:np.ndarray):
-        self.X = X.astype(np.float32)
+    def __init__(self,Xr:np.ndarray,Xn:np.ndarray,V:np.ndarray,Y:np.ndarray):
+        self.Xr = Xr.astype(np.float32)
+        self.Xn = Xn.astype(np.float32)
         self.V = V.astype(np.float32)
         self.Y = Y.astype(np.float32)
 
@@ -21,17 +21,20 @@ class VisionPoseData(Dataset):
         return self.Y.shape[1]
 
     def __getitem__(self,idx):
-        x = self.X[idx,:,:,:]
+        xr = self.Xr[idx,:,:,:]
+        xn = self.Xn[idx,:,:,:]
         v = self.V[:,idx]
         y = self.Y[:,idx]
         
-        return x,v,y
+        return xr,xn,v,y
     
 def get_data(ratio:float,Ndata:int=None):
     # Paths
-    images_dir = 'data/images'
     transforms_file = 'data/transforms.json'
-    
+    real_file = 'data/images'
+    nerf_file = 'data/images'
+    # nerf_file = 'data/mocap'
+
     # Load frames
     with open(transforms_file, 'r') as json_file:
         frames = json.load(json_file)["frames"]
@@ -48,18 +51,21 @@ def get_data(ratio:float,Ndata:int=None):
     Ntt = Nimg - Ntn
 
     # Gather Training Data
-    XXdata = []
+    XXrdata = []
+    XXndata = []
     VVdata = []
     YYdata = []
     for frame in frames:
         # Get the raw image and transform
         file_name = frame["file_path"].split('/')[-1]
-        img_raw = Image.open(f'{images_dir}/{file_name}')
+        img_raw_real = Image.open(f'{real_file}/{file_name}')
+        img_raw_nerf = Image.open(f'{nerf_file}/{file_name}')
 
         transform = np.array(frame["transform_matrix"])
 
         # Process into ResNet amenable image, gravity vector and pose vector
-        img_rnet = preprocess(img_raw).unsqueeze(0).numpy()
+        img_rnet_real = preprocess(img_raw_real).unsqueeze(0).numpy()
+        img_rnet_nerf = preprocess(img_raw_nerf).unsqueeze(0).numpy()
 
         v_grav = transform[:3,:3] @ np.array([0,0,-1])
 
@@ -68,15 +74,17 @@ def get_data(ratio:float,Ndata:int=None):
         pose = np.hstack((t_img,q_img))
 
         # Append to the data
-        XXdata.append(img_rnet)
+        XXrdata.append(img_rnet_real)
+        XXndata.append(img_rnet_nerf)
         VVdata.append(v_grav)
         YYdata.append(pose)
     
-    Xdata = np.concatenate(XXdata,axis=0)
+    Xrdata = np.concatenate(XXrdata,axis=0)
+    Xndata = np.concatenate(XXndata,axis=0)
     Vdata = np.stack(VVdata,axis=1)
     Ydata = np.stack(YYdata,axis=1)
 
-    dset = VisionPoseData(Xdata,Vdata,Ydata)
+    dset = VisionPoseData(Xrdata,Xndata,Vdata,Ydata)
     tn_dset, tt_dset = random_split(dset,[Ntn,Ntt])
 
     tn_lder = DataLoader(tn_dset, batch_size=64, shuffle=True, drop_last = False)

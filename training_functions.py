@@ -5,8 +5,9 @@ from torch.utils.data import DataLoader
 
 np.set_printoptions(formatter={'float': '{: 0.3f}'.format})
 
-def train_model(model:VisionPoseMLP, train_loader:DataLoader, model_name:str,
-                num_epochs:int=100,num_print:int=100):
+def train_model(model:VisionPoseMLP, train_loader:DataLoader,
+                model_name:str, useNeRF:bool=True, Neps:int=100,
+                Nprt:int=100):
     # Training Config
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     criterion = torch.nn.MSELoss(reduction='mean')
@@ -16,10 +17,15 @@ def train_model(model:VisionPoseMLP, train_loader:DataLoader, model_name:str,
     model = model.to(device)
     model.train()
 
-    for epoch in range(num_epochs):
+    for epoch in range(Neps):
         losses = []
 
-        for inputs_x,inputs_v, targets in train_loader:
+        for inputs_xr,inputs_xn,inputs_v,targets in train_loader:
+            if useNeRF is True:
+                inputs_x = inputs_xn
+            else:
+                inputs_x = inputs_xr
+
             # Move data to the device
             inputs_x,inputs_v,targets = inputs_x.to(device),inputs_v.to(device),targets.to(device)
 
@@ -41,13 +47,12 @@ def train_model(model:VisionPoseMLP, train_loader:DataLoader, model_name:str,
             # Append the loss
             losses.append(loss.item())
 
-        if epoch % num_print == 0:
-            print("Epoch: {:3d} | Loss: {:4.2f}".format(epoch, sum(losses)/len(losses)))
+        if (epoch+1) % Nprt == 0:
+            print("Epoch: {:3d} | Loss: {:4.5f}".format(epoch+1, sum(losses)/len(losses)))
 
-    print("Epoch: {:3d} | Loss: {:4.2f}".format(epoch, sum(losses)/len(losses)))
     torch.save(model.state_dict(), 'models/'+model_name+'.pth')
 
-def test_model(model, test_loader):
+def test_model(model,test_loader,useNeRF:bool=False):
     # Testing Config
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     criterion = torch.nn.MSELoss(reduction='mean')
@@ -59,7 +64,12 @@ def test_model(model, test_loader):
     total_loss = 0.0
     total_samples = 0
     with torch.no_grad():
-        for inputs_x,inputs_v, targets in test_loader:
+        for inputs_xr,inputs_xn,inputs_v, targets in test_loader:
+            if useNeRF is True:
+                inputs_x = inputs_xn
+            else:
+                inputs_x = inputs_xr
+                
             # Move data to the device
             inputs_x,inputs_v,targets = inputs_x.to(device),inputs_v.to(device),targets.to(device)
 
