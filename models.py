@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet18, ResNet18_Weights
+from typing import List
 
 class VisionPoseMLP(nn.Module):
-    def __init__(self,layer_sizes:list[int],lock_resnet:bool=True):
+    def __init__(self,layer_sizes:List[int],lock_resnet:bool=True):
         super(VisionPoseMLP, self).__init__()
 
         self.networks = nn.ModuleList(
