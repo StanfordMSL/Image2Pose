@@ -7,7 +7,7 @@ np.set_printoptions(formatter={'float': '{: 0.3f}'.format})
 
 def train_model(model:VisionPoseMLP, train_loader:DataLoader,
                 model_name:str, useNeRF:bool=True, Neps:int=100,
-                Nprt:int=100):
+                Nprt:int=50):
     # Training Config
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     criterion = torch.nn.MSELoss(reduction='mean')
@@ -52,7 +52,7 @@ def train_model(model:VisionPoseMLP, train_loader:DataLoader,
 
     torch.save(model.state_dict(), 'models/'+model_name+'.pth')
 
-def test_model(model,test_loader,useNeRF:bool=False):
+def test_model(model,test_loader,useNeRF:bool=False,Nexp:int=3):
     # Testing Config
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     criterion = torch.nn.MSELoss(reduction='mean')
@@ -90,7 +90,7 @@ def test_model(model,test_loader,useNeRF:bool=False):
     
     # Print examples
     print('Examples:')
-    for _ in range(3):
+    for _ in range(Nexp):
         print("-------------------------------------------------------------")
         idx = np.random.randint(0,targets.size(0))
         output = outputs[idx].cpu().numpy()
